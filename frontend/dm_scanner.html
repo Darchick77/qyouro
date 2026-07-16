@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<meta name="theme-color" content="#1a1a1a">
+<title>DataMatrix Scanner v5</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow: hidden; height: 100dvh; width: 100vw;
+    touch-action: none; -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  }
+  #container { position: relative; width: 100%; height: 100%; }
+  #video {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; object-fit: cover;
+    z-index: 1; transition: opacity 0.2s;
+  }
+  #video.frozen { opacity: 0; pointer-events: none; }
+  #freezeCanvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; z-index: 1;
+    display: none; background: #000;
+  }
+  #freezeCanvas.visible { display: block; }
+  #overlayCanvas {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; z-index: 2; pointer-events: none;
+  }
+  #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+  #overlay::before {
+    content: '';
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.30);
+    --s: 240px;
+    --x: calc(50% - var(--s) / 2);
+    --y: calc(50% - var(--s) / 2);
+    clip-path: polygon(
+      0% 0%, 0% 100%,
+      var(--x) 100%, var(--x) var(--y),
+      calc(var(--x) + var(--s)) var(--y),
+      calc(var(--x) + var(--s)) calc(var(--y) + var(--s)),
+      var(--x) calc(var(--y) + var(--s)),
+      var(--x) 100%, 100% 100%, 100% 0%
+    );
+  }
+  .corner {
+    position: absolute; width: 32px; height: 32px;
+    border-color: #4caf50; border-style: solid; z-index: 4;
+  }
+  .corner-tl { top: calc(50% - 120px); left: calc(50% - 120px); border-width: 4px 0 0 4px; border-radius: 6px 0 0 0; }
+  .corner-tr { top: calc(50% - 120px); right: calc(50% - 120px); border-width: 4px 4px 0 0; border-radius: 0 6px 0 0; }
+  .corner-bl { bottom: calc(50% - 120px); left: calc(50% - 120px); border-width: 0 0 4px 4px; border-radius: 0 0 0 6px; }
+  .corner-br { bottom: calc(50% - 120px); right: calc(50% - 120px); border-width: 0 4px 4px 0; border-radius: 0 0 6px 0; }
+  #status {
+    position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+    z-index: 10; background: rgba(0,0,0,0.75); color: #999;
+    font-size: 13px; padding: 10px 20px; border-radius: 20px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    text-align: center; transition: all 0.3s; max-width: 90vw; white-space: nowrap;
+  }
+  #status.found { color: #4caf50; }
+  #status.bolt { color: #e91e63; }
+  #result {
+    position: absolute; bottom: 130px; left: 10px; right: 10px;
+    z-index: 10; background: rgba(0,0,0,0.88); color: #4ec94e;
+    font-family: 'Consolas', monospace; font-size: 14px; font-weight: bold;
+    padding: 12px 16px; border-radius: 12px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    text-align: center; word-break: break-all; display: none;
+  }
+
+  #crpt-btn {
+    position: absolute; bottom: 160px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 15; background: #1565c0; color: #fff; border: none;
+    font-size: 14px; font-weight: 700; padding: 12px 24px;
+    border-radius: 25px; cursor: pointer;
+    box-shadow: 0 2px 12px rgba(21,101,192,0.4);
+    display: none; touch-action: manipulation;
+  }
+  #crpt-btn:active { transform: translateX(-50%) scale(0.95); }
+  #crpt-btn.visible { display: block; }
+
+  #crpt-result {
+    position: absolute; bottom: 190px; left: 10px; right: 10px;
+    z-index: 15; background: rgba(13,13,13,0.95); color: #fff;
+    font-size: 13px; padding: 14px 16px; border-radius: 12px;
+    border-left: 3px solid #1565c0;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    display: none; line-height: 1.6;
+  }
+  #crpt-result.visible { display: block; }
+  #crpt-result .crpt-name { font-size: 15px; font-weight: 700; color: #64b5f6; margin-bottom: 8px; }
+  #crpt-result .crpt-row { color: #aaa; margin-bottom: 4px; }
+  #crpt-result .crpt-row span { color: #eee; }
+  #crpt-result .crpt-notfound { color: #ff8a65; }
+  #topbar {
+    position: absolute; top: 16px; left: 16px; right: 16px;
+    z-index: 10; display: flex; align-items: center; justify-content: space-between;
+  }
+  #logo {
+    background: rgba(0,0,0,0.5); color: #fff; font-size: 15px; font-weight: 700;
+    padding: 8px 14px; border-radius: 10px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  .icon-btn {
+    width: 44px; height: 44px; border-radius: 50%; border: none;
+    font-size: 20px; cursor: pointer; display: flex;
+    align-items: center; justify-content: center;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: all 0.2s; touch-action: manipulation;
+  }
+  #flash-btn { background: rgba(0,0,0,0.5); color: #fff; }
+  #flash-btn.on { background: #ffc107; color: #000; box-shadow: 0 0 15px rgba(255,193,7,0.5); }
+  #flash-btn.hidden { display: none; }
+  #bottom-controls {
+    position: absolute; bottom: 30px; left: 0; right: 0;
+    z-index: 20; display: flex; align-items: center; justify-content: center; gap: 30px;
+  }
+  #bolt-btn {
+    background: #9c27b0; color: #fff; border: none;
+    width: 64px; height: 64px; border-radius: 50%; font-size: 28px;
+    cursor: pointer; box-shadow: 0 0 25px rgba(156,39,176,0.6), 0 4px 15px rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s; touch-action: manipulation;
+  }
+  #bolt-btn:active { transform: scale(0.92); }
+  #bolt-btn.disabled { background: #e91e63; pointer-events: none; }
+  #gallery-btn-bottom {
+    background: rgba(255,255,255,0.12); color: #fff; border: none;
+    width: 48px; height: 48px; border-radius: 50%; font-size: 22px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    touch-action: manipulation;
+  }
+  #file-input { display: none; }
+  #error-screen {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 100; background: #0f0f1a; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    color: #fff; text-align: center; padding: 24px;
+  }
+  #error-screen h2 { color: #ff4d4d; margin-bottom: 12px; font-size: 20px; }
+  #error-screen p { color: #aaa; font-size: 14px; line-height: 1.5; max-width: 300px; }
+
+  #welcome-screen {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 200; background: #0d0d0d;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #fff; text-align: center; padding: 30px;
+  }
+  #welcome-screen.hidden { display: none; }
+
+  #welcome-logo {
+    font-size: 32px; font-weight: 900; margin-bottom: 50px;
+    letter-spacing: 2px;
+  }
+  #welcome-logo span { color: #4caf50; }
+
+  #welcome-big-text {
+    font-size: 28px; font-weight: 800; color: #ffc107;
+    margin-bottom: 40px; line-height: 1.4; max-width: 320px;
+    text-transform: uppercase;
+  }
+
+  #welcome-terms {
+    font-size: 11px; color: #666; max-width: 300px;
+    line-height: 1.6; margin-bottom: 40px;
+  }
+
+  #welcome-btn {
+    background: #4caf50; color: #fff; border: none;
+    font-size: 18px; font-weight: 700; padding: 16px 50px;
+    border-radius: 30px; cursor: pointer;
+    box-shadow: 0 4px 20px rgba(76,175,80,0.4);
+    transition: all 0.2s; touch-action: manipulation;
+  }
+  #welcome-btn:active { transform: scale(0.95); background: #388e3c; }
+</style>
+</head>
+<body>
+
+<div id="container">
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="freezeCanvas"></canvas>
+  <canvas id="overlayCanvas"></canvas>
+  <div id="overlay">
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
+  </div>
+
+  <div id="topbar">
+    <div id="logo">DM Scanner v5</div>
+    <button id="flash-btn" class="icon-btn hidden" onclick="toggleFlash(event)">🔦</button>
+  </div>
+
+  <div id="status">Наведите камеру на DataMatrix</div>
+  <div id="result"></div>
+  <button id="crpt-btn" onclick="checkCrpt(event)">🔍 Проверить в Честном Знаке</button>
+  <div id="crpt-result"></div>
+
+  <div id="bottom-controls">
+    <button id="gallery-btn-bottom" onclick="openGallery(event)">📁</button>
+    <button id="bolt-btn" onclick="boltScan(event)">⚡</button>
+    <div style="width:48px"></div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" onchange="handleGalleryPhoto(event)">
+
+<div id="error-screen">
+  <h2>Нет доступа к камере</h2>
+  <p>Разрешите доступ к камере в настройках браузера и перезапустите приложение.</p>
+</div>
+
+<div id="welcome-screen">
+  <div id="welcome-logo">Qyouro<span>&bull;</span>Scanner</div>
+  <div id="welcome-big-text">ПРОТРИТЕ КАМЕРУ</div>
+  <div id="welcome-terms">
+    Нажимая кнопку «Начать сканирование», вы соглашаетесь<br>
+    с <b>Пользовательским соглашением</b> Qyouro.<br><br>
+    Фотографии обрабатываются «на лету» в оперативной памяти<br>
+    и не сохраняются. Данные не передаются третьим лицам.
+  </div>
+  <button id="welcome-btn" onclick="startApp(event)">Начать сканирование</button>
+</div>
+
+<script>
+  const API_URL = window.location.origin;
+  const video = document.getElementById('video');
+  const freezeCanvas = document.getElementById('freezeCanvas');
+  const freezeCtx = freezeCanvas.getContext('2d');
+  const overlayCanvas = document.getElementById('overlayCanvas');
+  const overlayCtx = overlayCanvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const resultEl = document.getElementById('result');
+  const boltBtn = document.getElementById('bolt-btn');
+  const flashBtn = document.getElementById('flash-btn');
+  const fileInput = document.getElementById('file-input');
+  const errorScreen = document.getElementById('error-screen');
+  const welcomeScreen = document.getElementById('welcome-screen');
+  const crptBtn = document.getElementById('crpt-btn');
+  const crptResult = document.getElementById('crpt-result');
+
+  let scanning = false;
+  let lastScan = 0;
+  const SCAN_INTERVAL = 250;
+  let stream = null;
+  let boltActive = false;
+  let flashOn = false;
+  let videoTrack = null;
+  let nativeWidth = 0;
+  let nativeHeight = 0;
+  let photoMode = false;
+  let lastDecodedCode = null;
+
+  async function initCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      videoTrack = stream.getVideoTracks()[0];
+
+      if (videoTrack.getCapabilities) {
+        var caps = videoTrack.getCapabilities();
+        if (caps.torch) flashBtn.classList.remove('hidden');
+      }
+
+      await video.play();
+
+      video.addEventListener('loadedmetadata', function() {
+        nativeWidth = video.videoWidth;
+        nativeHeight = video.videoHeight;
+        freezeCanvas.width = nativeWidth;
+        freezeCanvas.height = nativeHeight;
+        overlayCanvas.width = nativeWidth;
+        overlayCanvas.height = nativeHeight;
+        scanning = true;
+        requestAnimationFrame(scanLoop);
+      });
+    } catch (err) {
+      errorScreen.style.display = 'flex';
+    }
+  }
+
+  function toggleFlash(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (!videoTrack) return;
+    flashOn = !flashOn;
+    videoTrack.applyConstraints({ advanced: [{ torch: flashOn }] })
+      .then(function() { flashBtn.classList.toggle('on', flashOn); })
+      .catch(function() { flashOn = false; flashBtn.classList.remove('on'); });
+  }
+
+  function openGallery(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    fileInput.click();
+  }
+
+  function showCodeResult(code, method) {
+    lastDecodedCode = code;
+    resultEl.style.display = 'block';
+    resultEl.textContent = code;
+    crptBtn.classList.add('visible');
+    crptResult.classList.remove('visible');
+    crptResult.innerHTML = '';
+  }
+
+  function hideCodeResult() {
+    resultEl.style.display = 'none';
+    crptBtn.classList.remove('visible');
+    crptResult.classList.remove('visible');
+    crptResult.innerHTML = '';
+    lastDecodedCode = null;
+  }
+
+  async function checkCrpt(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (!lastDecodedCode) return;
+    
+    crptResult.classList.add('visible');
+    crptResult.innerHTML = '<div class="crpt-row">🔍 Проверка в Честном Знаке...</div>';
+    
+    try {
+      var r = await fetch(API_URL + '/check-crpt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: lastDecodedCode })
+      });
+      var data = await r.json();
+      
+      if (data.found === true) {
+        var html = '<div class="crpt-name">✓ ' + (data.product_name || 'Товар найден') + '</div>';
+        if (data.manufacturer) html += '<div class="crpt-row">Производитель: <span>' + data.manufacturer + '</span></div>';
+        if (data.status) html += '<div class="crpt-row">Статус: <span>' + data.status + '</span></div>';
+        if (data.gtin) html += '<div class="crpt-row">GTIN: <span>' + data.gtin + '</span></div>';
+        if (data.production_date) html += '<div class="crpt-row">Дата производства: <span>' + data.production_date + '</span></div>';
+        if (data.package_type) html += '<div class="crpt-row">Тип упаковки: <span>' + data.package_type + '</span></div>';
+        html += '<div class="crpt-row">Источник: <span>' + (data.source || 'Честный Знак') + '</span></div>';
+        crptResult.innerHTML = html;
+      } else if (data.reason) {
+        crptResult.innerHTML = '<div class="crpt-notfound">' + data.reason + '</div>';
+        if (data.web_check_url || true) {
+          crptResult.innerHTML += '<div class="crpt-row" style="margin-top:10px"><a href="https://xn--80ajghhoc2aj1c8b.xn--p1ai/" target="_blank" rel="noopener" style="color:#64b5f6;font-size:15px;font-weight:700;text-decoration:none;padding:10px 0;display:block">🔗 Открыть чекер Честного Знака</a></div>';
+          crptResult.innerHTML += '<div class="crpt-row" style="color:#888;font-size:11px">Откроется в новом окне — введите код вручную</div>';
+        }
+      } else {
+        crptResult.innerHTML = '<div class="crpt-notfound">✗ Код не найден в системе Честный Знак</div>';
+      }
+    } catch (err) {
+      crptResult.innerHTML = '<div class="crpt-notfound">Ошибка проверки: ' + (err.message || err) + '</div>';
+    }
+  }
+
+  async function handleGalleryPhoto(event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    fileInput.value = '';
+    photoMode = true;
+    video.classList.add('frozen');
+    boltBtn.style.display = 'none';
+    document.getElementById('bottom-controls').style.display = 'none';
+    statusEl.textContent = '📁 Сканирую...';
+    statusEl.className = 'bolt';
+    resultEl.style.display = 'none';
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    try {
+      var formData = new FormData();
+      formData.append('file', file, file.name);
+      var r = await fetch(API_URL + '/scan-photo', { method: 'POST', body: formData });
+      var data = await r.json();
+
+      if (data.code) {
+        showCodeResult(data.code, data.method);
+        statusEl.textContent = '✓ НАЙДЕН [' + (data.method || 'scan_v5') + ']';
+        statusEl.className = 'found';
+      } else {
+        hideCodeResult();
+        statusEl.textContent = '✗ Не прочитано';
+        statusEl.className = '';
+      }
+
+      setTimeout(function() {
+        exitPhotoMode();
+        if (data.code) {
+          setTimeout(function() {
+            hideCodeResult();
+            statusEl.textContent = 'Наведите камеру на DataMatrix';
+            statusEl.className = '';
+          }, 5000);
+        }
+      }, 4000);
+    } catch (err) {
+      statusEl.textContent = 'Ошибка сервера: ' + (err.message || err);
+      statusEl.className = '';
+      exitPhotoMode();
+    }
+  }
+
+  function exitPhotoMode() {
+    photoMode = false;
+    video.classList.remove('frozen');
+    boltBtn.style.display = '';
+    document.getElementById('bottom-controls').style.display = '';
+  }
+
+  async function boltScan(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (boltActive || photoMode) return;
+
+    if (video.readyState < 2 || video.videoWidth === 0) {
+      statusEl.textContent = 'Загрузка камеры...';
+      setTimeout(function() { boltScan(null); }, 300);
+      return;
+    }
+
+    boltActive = true;
+    boltBtn.classList.add('disabled');
+
+    var w = video.videoWidth;
+    var h = video.videoHeight;
+    freezeCanvas.width = w;
+    freezeCanvas.height = h;
+    freezeCtx.drawImage(video, 0, 0, w, h);
+
+    video.classList.add('frozen');
+    freezeCanvas.classList.add('visible');
+
+    statusEl.textContent = '⚡ Сканирую...';
+    statusEl.className = 'bolt';
+    resultEl.style.display = 'none';
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    var blob = await new Promise(function(r) {
+      freezeCanvas.toBlob(function(b) { r(b); }, 'image/jpeg', 0.92);
+    });
+
+    if (!blob) {
+      statusEl.textContent = 'Ошибка захвата кадра';
+      statusEl.className = '';
+      resumeFromFreeze();
+      return;
+    }
+
+    try {
+      var formData = new FormData();
+      formData.append('file', blob, 'frame.jpg');
+
+      var resp = await fetch(API_URL + '/scan-square', { method: 'POST', body: formData });
+      var data = await resp.json();
+      overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+      if (data.code) {
+        showCodeResult(data.code, data.method);
+        statusEl.textContent = '✓ НАЙДЕН [' + (data.method || 'scan_v5') + ']';
+        statusEl.className = 'found';
+      } else {
+        hideCodeResult();
+        statusEl.textContent = '✗ Не прочитано';
+        statusEl.className = '';
+      }
+
+      setTimeout(function() {
+        resumeFromFreeze();
+        if (data.code) {
+          setTimeout(function() {
+            hideCodeResult();
+            statusEl.textContent = 'Наведите камеру на DataMatrix';
+            statusEl.className = '';
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+          }, 4000);
+        }
+      }, 2500);
+    } catch (err) {
+      statusEl.textContent = 'Ошибка сервера: ' + (err.message || err);
+      statusEl.className = '';
+      resumeFromFreeze();
+    }
+  }
+
+  function resumeFromFreeze() {
+    boltActive = false;
+    boltBtn.classList.remove('disabled');
+    video.classList.remove('frozen');
+    freezeCanvas.classList.remove('visible');
+    freezeCtx.clearRect(0, 0, freezeCanvas.width, freezeCanvas.height);
+  }
+
+  function sendFrame(blob) {
+    var formData = new FormData();
+    formData.append('file', blob, 'frame.jpg');
+
+    fetch(API_URL + '/scan-v5', { method: 'POST', body: formData })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (boltActive || photoMode) return;
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        if (data.code) {
+          showCodeResult(data.code, data.method);
+          statusEl.textContent = '✓ НАЙДЕН [' + (data.method || 'scan_v5') + ']';
+          statusEl.className = 'found';
+        } else {
+          hideCodeResult();
+          statusEl.textContent = 'Наведите камеру на DataMatrix';
+          statusEl.className = '';
+        }
+      })
+      .catch(function() {});
+  }
+
+  function scanLoop(timestamp) {
+    if (!scanning) return;
+    if (boltActive || photoMode) { requestAnimationFrame(scanLoop); return; }
+    if (timestamp - lastScan < SCAN_INTERVAL) { requestAnimationFrame(scanLoop); return; }
+
+    var w = video.videoWidth;
+    var h = video.videoHeight;
+    if (w === 0 || h === 0) { requestAnimationFrame(scanLoop); return; }
+
+    lastScan = timestamp;
+
+    var offCanvas = document.createElement('canvas');
+    offCanvas.width = w;
+    offCanvas.height = h;
+    offCanvas.getContext('2d').drawImage(video, 0, 0);
+
+    offCanvas.toBlob(function(blob) { if (blob) sendFrame(blob); }, 'image/jpeg', 0.75);
+    requestAnimationFrame(scanLoop);
+  }
+
+  function stopCamera() {
+    scanning = false;
+    if (stream) { stream.getTracks().forEach(function(t) { t.stop(); }); stream = null; }
+  }
+
+  function startApp(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    welcomeScreen.classList.add('hidden');
+    initCamera();
+  }
+
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) stopCamera();
+    else if (!scanning && !stream && welcomeScreen.classList.contains('hidden')) initCamera();
+  });
+
+  // initCamera called by startApp() when user clicks welcome button
+</script>
+
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+<script>if (window.vkBridge) vkBridge.send('VKWebAppInit', {});</script>
+</body>
+</html>

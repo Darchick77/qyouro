@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<meta name="theme-color" content="#1a1a2e">
+<title>Qyouro — Сканер DataMatrix</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0f0f1a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow: hidden;
+    height: 100dvh;
+    width: 100vw;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  #container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #video {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 1;
+  }
+
+  #canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  #overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 3;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #overlay::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.35);
+    --s: 240px;
+    --x: calc(50% - var(--s) / 2);
+    --y: calc(50% - var(--s) / 2);
+    clip-path: polygon(
+      0% 0%, 0% 100%,
+      var(--x) 100%, var(--x) var(--y),
+      calc(var(--x) + var(--s)) var(--y),
+      calc(var(--x) + var(--s)) calc(var(--y) + var(--s)),
+      var(--x) calc(var(--y) + var(--s)),
+      var(--x) 100%,
+      100% 100%, 100% 0%
+    );
+  }
+
+  .corner {
+    position: absolute;
+    width: 32px; height: 32px;
+    border-color: #00ff88;
+    border-style: solid;
+    z-index: 4;
+  }
+  .corner-tl { top: calc(50% - 120px); left: calc(50% - 120px); border-width: 3px 0 0 3px; border-radius: 6px 0 0 0; }
+  .corner-tr { top: calc(50% - 120px); right: calc(50% - 120px); border-width: 3px 3px 0 0; border-radius: 0 6px 0 0; }
+  .corner-bl { bottom: calc(50% - 120px); left: calc(50% - 120px); border-width: 0 0 3px 3px; border-radius: 0 0 0 6px; }
+  .corner-br { bottom: calc(50% - 120px); right: calc(50% - 120px); border-width: 0 3px 3px 0; border-radius: 0 0 6px 0; }
+
+  #status {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    background: rgba(0,0,0,0.7);
+    color: #ccc;
+    font-size: 14px;
+    padding: 10px 24px;
+    border-radius: 20px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    text-align: center;
+    transition: color 0.3s;
+    pointer-events: auto;
+  }
+
+  #status.detected {
+    color: #00ff88;
+    animation: pulse 0.6s ease-in-out 2;
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: translateX(-50%) scale(1); }
+    50% { transform: translateX(-50%) scale(1.05); }
+  }
+
+  #topbar {
+    position: absolute;
+    top: 16px; left: 16px; right: 16px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    pointer-events: auto;
+  }
+
+  #logo {
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 8px 16px;
+    border-radius: 12px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    letter-spacing: -0.3px;
+  }
+  #logo span { color: #00ff88; }
+
+  #close-btn {
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    border: none;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    font-size: 20px;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+  }
+
+  #error-screen {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 100;
+    background: #0f0f1a;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    text-align: center;
+    padding: 24px;
+  }
+  #error-screen h2 { color: #ff4d4d; margin-bottom: 12px; font-size: 20px; }
+  #error-screen p { color: #aaa; font-size: 14px; line-height: 1.5; max-width: 300px; }
+</style>
+</head>
+<body>
+
+<div id="container">
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
+  </div>
+
+  <div id="topbar">
+    <div id="logo">Qyouro<span>•</span>сканер</div>
+    <button id="close-btn" onclick="window.close?.() ?? history.back()">✕</button>
+  </div>
+
+  <div id="status">📷 Наведите камеру на код DataMatrix</div>
+</div>
+
+<div id="error-screen">
+  <h2>⚠️ Нет доступа к камере</h2>
+  <p>Пожалуйста, разрешите доступ к камере в настройках браузера и перезапустите приложение.</p>
+</div>
+
+<script>
+  const API_URL = window.location.origin + '/detect';
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const errorScreen = document.getElementById('error-screen');
+
+  let scanning = false;
+  let lastScan = 0;
+  const SCAN_INTERVAL = 400;
+  let stream = null;
+
+  async function initCamera() {
+    try {
+      const constraints = {
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      };
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      await video.play();
+
+      video.addEventListener('loadedmetadata', () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        scanning = true;
+        requestAnimationFrame(scanLoop);
+      });
+    } catch (err) {
+      console.error('Camera error:', err);
+      errorScreen.style.display = 'flex';
+    }
+  }
+
+  function sendFrame(blob) {
+    const formData = new FormData();
+    formData.append('file', blob, 'frame.jpg');
+
+    fetch(API_URL, { method: 'POST', body: formData })
+      .then(r => r.json())
+      .then(data => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (data.detected && data.boxes.length > 0) {
+          drawBoxes(data.boxes);
+          statusEl.textContent = `✅ DataMatrix обнаружен (${data.count} шт.)`;
+          statusEl.className = 'detected';
+        } else {
+          statusEl.textContent = '📷 Наведите камеру на код DataMatrix';
+          statusEl.className = '';
+        }
+      })
+      .catch(() => {
+        statusEl.textContent = '⚠️ Ошибка соединения с сервером';
+        statusEl.className = '';
+      });
+  }
+
+  function drawBoxes(boxes) {
+    const scaleX = canvas.width / video.videoWidth;
+    const scaleY = canvas.height / video.videoHeight;
+
+    for (const box of boxes) {
+      const x = box.x * scaleX;
+      const y = box.y * scaleY;
+      const w = box.width * scaleX;
+      const h = box.height * scaleY;
+
+      ctx.strokeStyle = '#00ff88';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#00ff88';
+      ctx.shadowBlur = 12;
+      ctx.strokeRect(x, y, w, h);
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = 'rgba(0, 255, 136, 0.08)';
+      ctx.fillRect(x, y, w, h);
+
+      ctx.font = 'bold 14px -apple-system, sans-serif';
+      ctx.fillStyle = '#00ff88';
+      ctx.fillText('DataMatrix', x, y - 6);
+    }
+  }
+
+  function scanLoop(timestamp) {
+    if (!scanning) return;
+    if (timestamp - lastScan < SCAN_INTERVAL) {
+      requestAnimationFrame(scanLoop);
+      return;
+    }
+    lastScan = timestamp;
+
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = video.videoWidth;
+    offCanvas.height = video.videoHeight;
+    const offCtx = offCanvas.getContext('2d');
+    offCtx.drawImage(video, 0, 0);
+
+    offCanvas.toBlob(blob => {
+      if (blob) sendFrame(blob);
+    }, 'image/jpeg', 0.75);
+
+    requestAnimationFrame(scanLoop);
+  }
+
+  function stopCamera() {
+    scanning = false;
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopCamera();
+    else if (!scanning && !stream) initCamera();
+  });
+
+  initCamera();
+</script>
+
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+<script>
+  if (window.vkBridge) {
+    vkBridge.send('VKWebAppInit', {});
+  }
+</script>
+
+</body>
+</html>

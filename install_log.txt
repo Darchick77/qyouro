@@ -1,0 +1,7 @@
+﻿python : Python 
+строка:1 знак:1
++ python -m pip install -r "qyouro\backend\requirements.txt" 2>&1 | Out ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Python :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
