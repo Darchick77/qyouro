@@ -4,3 +4,7 @@ opencv-python-headless==4.10.0.84
 pylibdmtx==0.1.10
 python-multipart==0.0.9
 numpy>=1.26,<3
+requests>=2.31
+bcrypt>=4.0
+PyJWT>=2.8
+urllib3>=2.0

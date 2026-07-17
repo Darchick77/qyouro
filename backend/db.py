@@ -213,4 +213,13 @@ def unbind_key(key_id: int = None, vk_user_id: int = None) -> bool:
     return affected > 0
 
 
+def delete_key(key_id: int) -> bool:
+    conn = get_db()
+    conn.execute("DELETE FROM license_keys WHERE id = ?", (key_id,))
+    conn.commit()
+    affected = conn.total_changes
+    conn.close()
+    return affected > 0
+
+
 init_db()
