@@ -7,8 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 from detector import detect_datamatrix_fast, detect_datamatrix_super, draw_boxes, draw_super_result
-from db import generate_key, validate_key, activate_key, get_profile, list_keys, revoke_key, unbind_key
+from db import generate_key, validate_key, activate_key, get_profile, list_keys, revoke_key, unbind_key, delete_key
 from crpt_checker import check_cis
+from auth_db import (admin_login, employee_login, admin_exists, create_admin,
+                      list_employees, create_employee, update_employee, delete_employee,
+                      reset_password as auth_reset_password, create_reset_token,
+                      verify_reset_token, change_password_by_email)
 import base64
 
 app = FastAPI(title="Qyouro DataMatrix Detector")
@@ -167,6 +171,105 @@ async def check_crpt_endpoint(req: CrptRequest):
     return JSONResponse(result)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# AUTH endpoints
+# ═══════════════════════════════════════════════════════════════════
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AdminCreateRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+
+
+class EmployeeRequest(BaseModel):
+    email: str
+    password: str
+    fio: str
+    phone: str = ""
+    role: str = "employee"
+
+
+class EmployeeUpdateRequest(BaseModel):
+    id: int
+    email: str = None
+    fio: str = None
+    phone: str = None
+    role: str = None
+    status: str = None
+
+
+class ResetRequest(BaseModel):
+    email: str = None
+    token: str = None
+    password: str = None
+    emp_id: int = None
+
+
+@app.get("/api/auth/check-admin")
+async def check_admin():
+    return {"exists": admin_exists()}
+
+@app.post("/api/auth/register-admin")
+async def register_admin(req: AdminCreateRequest):
+    if admin_exists():
+        return JSONResponse({"error": "Admin already exists"}, status_code=400)
+    create_admin(req.email, req.password, req.name)
+    return {"ok": True}
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest):
+    user = admin_login(req.email, req.password)
+    if user:
+        return {"ok": True, "role": "admin", "user": user}
+    user = employee_login(req.email, req.password)
+    if user:
+        return {"ok": True, "role": "employee", "user": user}
+    return JSONResponse({"ok": False, "error": "Неверный email или пароль"}, status_code=401)
+
+@app.get("/api/employees")
+async def get_employees():
+    return {"employees": list_employees()}
+
+@app.post("/api/employees")
+async def add_employee(req: EmployeeRequest):
+    ok = create_employee(req.email, req.password, req.fio, req.phone, req.role)
+    return {"ok": ok, "error": "Email уже занят" if not ok else None}
+
+@app.put("/api/employees")
+async def edit_employee(req: EmployeeUpdateRequest):
+    kwargs = {k: v for k, v in req.model_dump().items() if v is not None and k != "id"}
+    update_employee(req.id, **kwargs)
+    return {"ok": True}
+
+@app.delete("/api/employees/{emp_id}")
+async def remove_employee(emp_id: int):
+    delete_employee(emp_id)
+    return {"ok": True}
+
+@app.post("/api/auth/reset-password")
+async def request_reset(req: ResetRequest):
+    if req.email:
+        token = create_reset_token(req.email)
+        if token:
+            return {"ok": True, "message": "Инструкция отправлена на email (заглушка)", "token": token}
+        return JSONResponse({"ok": False, "error": "Email не найден"}, status_code=404)
+    if req.token and req.password:
+        email = verify_reset_token(req.token)
+        if email:
+            change_password_by_email(email, req.password)
+            return {"ok": True}
+        return JSONResponse({"ok": False, "error": "Неверный или просроченный токен"}, status_code=400)
+    if req.emp_id and req.password:
+        auth_reset_password(req.emp_id, req.password)
+        return {"ok": True}
+    return JSONResponse({"ok": False, "error": "Не указаны параметры"}, status_code=400)
+
+
 class KeyRequest(BaseModel):
     key: str
     vk_user_id: int
@@ -228,6 +331,12 @@ async def api_revoke_key(req: RevokeRequest):
 @app.post("/api/unbind-key")
 async def api_unbind_key(req: UnbindRequest):
     ok = unbind_key(req.key_id, req.vk_user_id)
+    return {"ok": ok}
+
+
+@app.delete("/api/keys/{key_id}")
+async def api_delete_key(key_id: int):
+    ok = delete_key(key_id)
     return {"ok": ok}
 
 
