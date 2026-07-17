@@ -10,7 +10,7 @@ from vk_api.utils import get_random_id
 # ═══════════════════════════════════════════════════════════════════
 
 VK_BOT_TOKEN = os.getenv("VK_BOT_TOKEN", "vk1.a.XAtzQqIzwir3KAup14kHfScscxpWcPP9fxz0o6YjMyTX9BSwlto2EsDWnUzy5z9ETw9T7pZhEuUOnLGARBRXxi-GxW_3tOMeELhK3yhJKvcrIvobfIN3VQaduQ7MSUZXLFQ9_SL6av07byLTH9uhEbwUujC_9OkHFQCFo42sMdb4BCbJQ-s9izX5n2e1ls0FbX7WA8BATNNeZu1wvcSWlQ")
-BACKEND_URL = os.getenv("BACKEND_URL", "https://qyouro.onrender.com")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://qyouro-1.onrender.com")
 YANDEX_OPROSY_LINK = "https://forms.yandex.ru/u/6a5866a29029022444bb64ce"
 VK_MINI_APP_ID = int(os.getenv("VK_MINI_APP_ID", "1234567"))
 VK_MINI_APP_URL = f"https://vk.com/app{VK_MINI_APP_ID}"
