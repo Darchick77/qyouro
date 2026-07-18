@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))
 def start_bot():
     bot_dir = os.path.join(os.path.dirname(__file__), "bot")
     sys.path.insert(0, bot_dir)
-    from main import run_bot
+    from bot_core import run_bot
     run_bot()
 
 
