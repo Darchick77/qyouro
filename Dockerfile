@@ -8,7 +8,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ backend/
 COPY frontend/ frontend/
+COPY bot/ bot/
+COPY run.py .
 
-WORKDIR /app/backend
 ENV PORT=10000
-CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+CMD python run.py
